@@ -73,6 +73,8 @@ std::array<JointIndex, 9> arm_joints = {
 std::array<float, 9> init_pos{};
 std::array<float, 9> current_jpos{};
 std::array<float, 9> current_tau_ff{};
+
+// needs experiementation to be changed
 float weight = 0.f;
 float weight_rate = 0.2f;
 float kp = 60.f;
@@ -85,7 +87,7 @@ unitree::robot::ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_> arm_sdk_publ
 unitree_go::msg::dds_::LowCmd_ msg;
 
 // Helper function to clamp joint values to safe limits
-std::array<float, 9> clamp_to_limits(const std::array<float, 9>& target_pose) {
+std::array<float, 9> clamp_to_limits(const std::array<float, 9>& target_pose) { // experimentally set limits- while sky is there
   std::array<float, 9> clamped_pose;
   for (int i = 0; i < target_pose.size(); ++i) {
     clamped_pose[i] = std::clamp(target_pose[i], joint_min_limits[i], joint_max_limits[i]);
@@ -100,7 +102,7 @@ void execute_pose(const std::array<float, 9>& target_pose, const std::array<floa
   auto sleep_time = std::chrono::milliseconds(static_cast<int>(control_dt / 0.001f));
 
   std::cout << "Executing pose: ";
-  for (const auto& val : safe_target_pose) {  // change to safe_target_pose to clamp limits after uncommenting line 95
+  for (const auto& val : target_pose) {  // change to safe_target_pose to clamp limits after uncommenting line 95  safe_
     std::cout << val << " ";
   }
   std::cout << std::endl;
@@ -108,13 +110,13 @@ void execute_pose(const std::array<float, 9>& target_pose, const std::array<floa
   for (int i = 0; i < static_cast<int>(5.f / control_dt); ++i) {
     bool movement_needed = false;
     for (int j = 0; j < init_pos.size(); ++j) {
-      float delta = safe_target_pose.at(j) - current_jpos.at(j);  // change to safe_target_pose to clamp limits after uncommenting line 95
+      float delta = target_pose.at(j) - current_jpos.at(j);  // change to safe_target_pose to clamp limits after uncommenting line 95 safe_target_pose
       if (std::abs(delta) > 1e-3) {
         movement_needed = true;
         current_jpos.at(j) += std::clamp(delta, -max_joint_delta, max_joint_delta);
       }
     }
-    if (movement_needed) {
+    if (movement_needed) { // check current position and move is required
       for (int j = 0; j < init_pos.size(); ++j) {
         msg.motor_cmd().at(arm_joints.at(j)).q(current_jpos.at(j));
         msg.motor_cmd().at(arm_joints.at(j)).dq(dq);
@@ -123,7 +125,7 @@ void execute_pose(const std::array<float, 9>& target_pose, const std::array<floa
         msg.motor_cmd().at(arm_joints.at(j)).tau(target_tau_ff.at(j));
       }
       arm_sdk_publisher->Write(msg);
-      std::this_thread::sleep_for(sleep_time);
+      std::this_thread::sleep_for(sleep_time); // sleep time calculated based on the d - line 102
     } else {
       break;
     }
@@ -131,16 +133,16 @@ void execute_pose(const std::array<float, 9>& target_pose, const std::array<floa
 }
 
 // Release control safely
-void release_control(int client_socket) {
+void release_control(int client_socket) { // when socket connection drops, or is there are problems, it releases the weight from the arms.
   std::cout << "Releasing control and returning to initial position..." << std::endl;
-  std::array<float, 9> zero_tau_ff = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+  std::array<float, 9> zero_tau_ff = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}; // From origin chest frame, 
   execute_pose(init_pos, zero_tau_ff);  // Return to initial position
 
   float delta_weight = weight_rate * control_dt;
   auto sleep_time = std::chrono::milliseconds(static_cast<int>(control_dt / 0.001f));
   int stop_time_steps = static_cast<int>(2.0f / control_dt);
 
-  for (int i = 0; i < stop_time_steps; ++i) {
+  for (int i = 0; i < stop_time_steps; ++i) { // divides pose into a path trajectory- multiple points to follow
     weight -= delta_weight;
     weight = std::clamp(weight, 0.f, 1.f);
     msg.motor_cmd().at(JointIndex::kNotUsedJoint).q(weight);
@@ -163,7 +165,7 @@ void initialize_arms() {
     msg.motor_cmd().at(JointIndex::kNotUsedJoint).q(weight * weight);
     std::this_thread::sleep_for(sleep_time);
   }
-  execute_pose(init_pos, tau_ff); // Call execute_pose to initialize arms
+  execute_pose(init_pos, tau_ff); // Call execute_pose to initialize arms - take control from H1 sports mode
   std::cout << "Socket ready, arms initialised." << std::endl;
 }
 
@@ -220,11 +222,11 @@ bool setup_socket(int &server_fd, struct sockaddr_in &address) {
     return true;
 }
 
-void receive_pose_commands(int server_fd, struct sockaddr_in &address) {
+void receive_pose_commands(int server_fd, struct sockaddr_in &address) { // setup socket and fetch data from socket- 18 values for 9 joints
   int new_socket;
   int addrlen = sizeof(address);
-  std::array<float, 9> target_pose;
-  std::array<float, 9> target_tau_ff;
+  std::array<float, 9> target_pose; // target pose 
+  std::array<float, 9> target_tau_ff; // target torque values that need to be sent seperately
   char buffer[1024];
 
   new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen);
