@@ -117,7 +117,7 @@ This repository differs from avp_teleoperate in that it does not utilize the uni
 ```bash
  conda create -n tv python=3.8
  conda activate tv
- conda install pinocchio -c conda-forge
+ conda install pinocchio=3.1.0 -c conda-forge
  pip install meshcat
  pip install casadi
  cd avp_teleoperate
